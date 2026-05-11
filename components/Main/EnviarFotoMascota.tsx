@@ -1,10 +1,10 @@
 import { CameraView, useCameraPermissions } from "expo-camera";
+import * as MediaLibrary from "expo-media-library";
 import React, { useRef, useState } from "react";
 import {
   Alert,
   Image,
   Linking,
-  Platform,
   ScrollView,
   StyleSheet,
   Text,
@@ -14,61 +14,90 @@ import {
 } from "react-native";
 
 export default function EnviarFotoMascota() {
-  const [permission, requestPermission] = useCameraPermissions();
+  const [cameraPermission, requestCameraPermission] = useCameraPermissions();
+  const [mediaPermission, requestMediaPermission] = MediaLibrary.usePermissions();
   const [camaraActiva, setCamaraActiva] = useState(false);
   const [fotoUri, setFotoUri] = useState<string | null>(null);
-  const [numero, setNumero] = useState("");
+  const [fotoGuardada, setFotoGuardada] = useState(false);
+  const [correo, setCorreo] = useState("");
+  const [asunto, setAsunto] = useState("");
   const [mensaje, setMensaje] = useState("");
+  const [enviando, setEnviando] = useState(false);
   const camaraRef = useRef<CameraView>(null);
 
   const abrirCamara = async () => {
-    if (!permission?.granted) {
-      const result = await requestPermission();
+    if (!cameraPermission?.granted) {
+      const result = await requestCameraPermission();
       if (!result.granted) {
         Alert.alert("Permiso denegado", "Se necesita acceso a la cámara.");
         return;
       }
     }
     setCamaraActiva(true);
+    setFotoGuardada(false);
   };
 
   const tomarFoto = async () => {
     if (!camaraRef.current) return;
-    const foto = await camaraRef.current.takePictureAsync({ quality: 0.7 });
-    setFotoUri(foto?.uri ?? null);
+
+    if (!mediaPermission?.granted) {
+      const result = await requestMediaPermission();
+      if (!result.granted) {
+        Alert.alert("Permiso denegado", "Se necesita acceso a la galería para guardar la foto.");
+        return;
+      }
+    }
+
+    const foto = await camaraRef.current.takePictureAsync({ quality: 0.85 });
+    if (!foto?.uri) return;
+
+    const asset = await MediaLibrary.createAssetAsync(foto.uri);
+    await MediaLibrary.createAlbumAsync("VetApp", asset, false);
+
+    setFotoUri(foto.uri);
+    setFotoGuardada(true);
     setCamaraActiva(false);
+
+    Alert.alert("✅ Foto guardada", "La foto se guardó en tu galería en el álbum 'VetApp'.");
   };
 
-  const enviarWhatsApp = () => {
-    const telefonoLimpio = numero.replace(/\D/g, "");
-    if (!telefonoLimpio) {
-      Alert.alert("Error", "Ingresa un número de teléfono válido.");
+  const enviarCorreo = async () => {
+    if (!correo.trim()) {
+      Alert.alert("Error", "Ingresa un correo electrónico.");
+      return;
+    }
+    if (!asunto.trim()) {
+      Alert.alert("Error", "Ingresa un asunto.");
       return;
     }
     if (!mensaje.trim()) {
-      Alert.alert("Error", "Escribe un mensaje antes de enviar.");
+      Alert.alert("Error", "Escribe un mensaje.");
+      return;
+    }
+    if (!fotoUri || !fotoGuardada) {
+      Alert.alert("Error", "Toma y guarda una foto primero.");
       return;
     }
 
-    const phone =
-      Platform.OS === "ios" ? `591${telefonoLimpio}` : `+591${telefonoLimpio}`;
-    const textoCodificado = encodeURIComponent(mensaje);
-    const url = `whatsapp://send?text=${textoCodificado}&phone=${phone}`;
+    setEnviando(true);
+    try {
+      const asuntoCodificado = encodeURIComponent(asunto);
+      const cuerpo = `${mensaje}\n\n📎 Adjunta manualmente la foto desde tu álbum 'VetApp' en la galería.`;
+      const mensajeCodificado = encodeURIComponent(cuerpo);
+      const mailtoUrl = `mailto:${correo}?subject=${asuntoCodificado}&body=${mensajeCodificado}`;
 
-    Linking.canOpenURL(url)
-      .then((supported) => {
-        if (!supported) {
-          Alert.alert(
-            "WhatsApp no encontrado",
-            "Asegúrate de tener WhatsApp instalado."
-          );
-        } else {
-          return Linking.openURL(url);
-        }
-      })
-      .catch(() =>
-        Alert.alert("Error", "No se pudo abrir WhatsApp.")
-      );
+      const puedeAbrir = await Linking.canOpenURL(mailtoUrl);
+      if (!puedeAbrir) {
+        Alert.alert("Sin app de correo", "No se encontró una app de correo instalada en el dispositivo.");
+        return;
+      }
+
+      await Linking.openURL(mailtoUrl);
+    } catch {
+      Alert.alert("Error", "No se pudo abrir el correo.");
+    } finally {
+      setEnviando(false);
+    }
   };
 
   if (camaraActiva) {
@@ -96,31 +125,16 @@ export default function EnviarFotoMascota() {
       <Text style={styles.sectionTitle}>Enviar Foto de Mascota</Text>
 
       <View style={styles.card}>
-        <Text style={styles.cardTitle}>Número WhatsApp</Text>
-        <View style={styles.phoneRow}>
-          <View style={styles.prefixBox}>
-            <Text style={styles.prefixText}>🇧🇴 +591</Text>
-          </View>
-          <TextInput
-            style={styles.phoneInput}
-            placeholder="Ej: 70000000"
-            keyboardType="phone-pad"
-            value={numero}
-            onChangeText={setNumero}
-            maxLength={8}
-          />
-        </View>
-      </View>
-
-      <View style={styles.card}>
-        <Text style={styles.cardTitle}>Foto de la mascota</Text>
+        <Text style={styles.cardTitle}>📷 Foto de la mascota</Text>
         {fotoUri ? (
           <View>
             <Image source={{ uri: fotoUri }} style={styles.preview} />
-            <TouchableOpacity
-              style={styles.retakeBtn}
-              onPress={abrirCamara}
-            >
+            {fotoGuardada && (
+              <View style={styles.savedBadge}>
+                <Text style={styles.savedBadgeText}>✅ Guardada en galería — álbum VetApp</Text>
+              </View>
+            )}
+            <TouchableOpacity style={styles.retakeBtn} onPress={abrirCamara}>
               <Text style={styles.retakeBtnText}>📷 Tomar otra foto</Text>
             </TouchableOpacity>
           </View>
@@ -128,33 +142,79 @@ export default function EnviarFotoMascota() {
           <TouchableOpacity style={styles.cameraBtn} onPress={abrirCamara}>
             <Text style={styles.cameraBtnIcon}>📷</Text>
             <Text style={styles.cameraBtnText}>Abrir cámara</Text>
-            <Text style={styles.cameraBtnSub}>Toma una foto de la mascota</Text>
+            <Text style={styles.cameraBtnSub}>
+              La foto se guardará en tu galería
+            </Text>
           </TouchableOpacity>
         )}
       </View>
 
       <View style={styles.card}>
-        <Text style={styles.cardTitle}>Mensaje</Text>
-        <TextInput
-          style={[styles.input, styles.textarea]}
-          placeholder="Escribe un mensaje para acompañar la foto..."
-          multiline
-          numberOfLines={4}
-          value={mensaje}
-          onChangeText={setMensaje}
-        />
+        <Text style={styles.cardTitle}>✉️ Datos del correo</Text>
+
+        <View style={styles.inputContainer}>
+          <Text style={styles.label}>Correo destinatario</Text>
+          <View style={styles.emailRow}>
+            <Text style={styles.emailIcon}>✉️</Text>
+            <TextInput
+              style={styles.emailInput}
+              placeholder="ejemplo@correo.com"
+              keyboardType="email-address"
+              autoCapitalize="none"
+              value={correo}
+              onChangeText={setCorreo}
+            />
+          </View>
+        </View>
+
+        <View style={styles.inputContainer}>
+          <Text style={styles.label}>Asunto</Text>
+          <TextInput
+            style={styles.input}
+            placeholder="Ej: Foto de mascota - Consulta veterinaria"
+            value={asunto}
+            onChangeText={setAsunto}
+          />
+        </View>
+
+        <View style={styles.inputContainer}>
+          <Text style={styles.label}>Mensaje</Text>
+          <TextInput
+            style={[styles.input, styles.textarea]}
+            placeholder="Escribe el cuerpo del correo..."
+            multiline
+            numberOfLines={4}
+            value={mensaje}
+            onChangeText={setMensaje}
+          />
+        </View>
       </View>
 
+      {fotoGuardada && (
+        <View style={styles.infoBox}>
+          <Text style={styles.infoText}>
+            📌 Al abrir el correo, adjunta manualmente la foto desde tu galería en el álbum <Text style={styles.infoBold}>VetApp</Text>.
+          </Text>
+        </View>
+      )}
+
       <TouchableOpacity
-        style={[styles.sendBtn, !fotoUri && styles.sendBtnDisabled]}
-        onPress={enviarWhatsApp}
-        disabled={!fotoUri}
+        style={[
+          styles.sendBtn,
+          (!fotoGuardada || enviando) && styles.sendBtnDisabled,
+        ]}
+        onPress={enviarCorreo}
+        disabled={!fotoGuardada || enviando}
       >
-        <Text style={styles.sendBtnText}>💬 Enviar por WhatsApp</Text>
+        <Text style={styles.sendBtnText}>
+          {enviando ? "Abriendo correo..." : "📧 Abrir correo"}
+        </Text>
       </TouchableOpacity>
 
-      {!fotoUri && (
-        <Text style={styles.hint}>* Toma una foto primero para habilitar el envío</Text>
+      {!fotoGuardada && (
+        <Text style={styles.hint}>
+          * Toma una foto primero para habilitar el envío
+        </Text>
       )}
     </ScrollView>
   );
@@ -191,33 +251,46 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: "#e0f0ea",
   },
-  phoneRow: {
+  inputContainer: {
+    marginBottom: 14,
+  },
+  label: {
+    color: "#45ac8b",
+    marginBottom: 6,
+    fontWeight: "600",
+    fontSize: 14,
+  },
+  emailRow: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 10,
-  },
-  prefixBox: {
-    backgroundColor: "#e8f5ef",
     borderWidth: 1,
     borderColor: "#c8e6da",
     borderRadius: 10,
-    paddingVertical: 12,
-    paddingHorizontal: 14,
+    backgroundColor: "#f9fdfc",
+    paddingHorizontal: 12,
   },
-  prefixText: {
-    color: "#2d7a61",
-    fontWeight: "700",
-    fontSize: 15,
+  emailIcon: {
+    fontSize: 18,
+    marginRight: 8,
   },
-  phoneInput: {
+  emailInput: {
     flex: 1,
+    paddingVertical: 12,
+    fontSize: 15,
+    color: "#1a1a1a",
+  },
+  input: {
     borderWidth: 1,
     borderColor: "#c8e6da",
     borderRadius: 10,
     padding: 12,
-    fontSize: 16,
+    fontSize: 15,
     color: "#1a1a1a",
     backgroundColor: "#f9fdfc",
+  },
+  textarea: {
+    minHeight: 100,
+    textAlignVertical: "top",
   },
   cameraBtn: {
     backgroundColor: "#e8f5ef",
@@ -243,7 +316,19 @@ const styles = StyleSheet.create({
     width: "100%",
     height: 220,
     borderRadius: 12,
-    marginBottom: 12,
+    marginBottom: 10,
+  },
+  savedBadge: {
+    backgroundColor: "#e0f5ed",
+    borderRadius: 8,
+    padding: 10,
+    marginBottom: 10,
+    alignItems: "center",
+  },
+  savedBadgeText: {
+    color: "#2d7a61",
+    fontWeight: "600",
+    fontSize: 13,
   },
   retakeBtn: {
     borderWidth: 1,
@@ -257,21 +342,24 @@ const styles = StyleSheet.create({
     fontWeight: "700",
     fontSize: 14,
   },
-  input: {
-    borderWidth: 1,
-    borderColor: "#c8e6da",
-    borderRadius: 10,
-    padding: 12,
-    fontSize: 15,
-    color: "#1a1a1a",
-    backgroundColor: "#f9fdfc",
+  infoBox: {
+    backgroundColor: "#fff8e1",
+    borderRadius: 12,
+    padding: 14,
+    marginBottom: 14,
+    borderLeftWidth: 4,
+    borderLeftColor: "#f5c518",
   },
-  textarea: {
-    minHeight: 100,
-    textAlignVertical: "top",
+  infoText: {
+    color: "#7a6000",
+    fontSize: 13,
+    lineHeight: 20,
+  },
+  infoBold: {
+    fontWeight: "700",
   },
   sendBtn: {
-    backgroundColor: "#25D366",
+    backgroundColor: "#45ac8b",
     paddingVertical: 16,
     borderRadius: 12,
     alignItems: "center",
