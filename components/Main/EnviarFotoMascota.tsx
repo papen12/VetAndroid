@@ -1,9 +1,11 @@
 import { CameraView, useCameraPermissions } from "expo-camera";
 import * as FileSystem from "expo-file-system";
+import * as Sharing from "expo-sharing";
 import React, { useRef, useState } from "react";
 import {
   Alert,
   Image,
+  Linking,
   Platform,
   ScrollView,
   StyleSheet,
@@ -12,7 +14,6 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
-import Share, { Social } from "react-native-share";
 
 export default function EnviarFotoMascota() {
   const [permission, requestPermission] = useCameraPermissions();
@@ -58,24 +59,47 @@ export default function EnviarFotoMascota() {
 
     setEnviando(true);
     try {
-      const base64 = await FileSystem.readAsStringAsync(fotoUri, {
-        encoding: "base64",
-      });
+      const disponible = await Sharing.isAvailableAsync();
+      if (!disponible) {
+        Alert.alert("No disponible", "Compartir no está disponible en este dispositivo.");
+        return;
+      }
 
-      const whatsAppNumber =
+      const phone =
         Platform.OS === "ios"
           ? `591${telefonoLimpio}`
-          : `+591${telefonoLimpio}`;
+          : `591${telefonoLimpio}`;
 
-      await Share.shareSingle({
-        social: Social.Whatsapp,
-        whatsAppNumber,
-        message: mensaje,
-        url: `data:image/jpeg;base64,${base64}`,
-        type: "image/jpeg",
-        filename: "mascota_foto",
-      } as any);
-    } catch {
+      const textoCodificado = encodeURIComponent(mensaje);
+      const whatsappUrl = `whatsapp://send?phone=${phone}&text=${textoCodificado}`;
+
+     const destino = `${FileSystem.Paths.cache}/mascota_foto.jpg`;
+
+      await FileSystem.copyAsync({
+        from: fotoUri,
+        to: destino,
+      });
+
+      const puedeAbrir = await Linking.canOpenURL(whatsappUrl);
+
+      if (puedeAbrir) {
+        await Linking.openURL(whatsappUrl);
+        await new Promise((resolve) => setTimeout(resolve, 1500));
+      } else {
+        Alert.alert(
+          "WhatsApp no disponible",
+          "No se pudo abrir WhatsApp en este dispositivo."
+        );
+      }
+
+      await Sharing.shareAsync(destino, {
+        mimeType: "image/jpeg",
+        dialogTitle: "Enviar foto de mascota por WhatsApp",
+        UTI: "public.jpeg",
+      });
+    } catch (error) {
+      Alert.alert("Error", "No se pudo compartir la foto.");
+      console.error(error);
     } finally {
       setEnviando(false);
     }
