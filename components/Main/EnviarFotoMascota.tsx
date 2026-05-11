@@ -1,6 +1,4 @@
 import { CameraView, useCameraPermissions } from "expo-camera";
-import * as FileSystem from "expo-file-system";
-import * as Sharing from "expo-sharing";
 import React, { useRef, useState } from "react";
 import {
   Alert,
@@ -21,7 +19,6 @@ export default function EnviarFotoMascota() {
   const [fotoUri, setFotoUri] = useState<string | null>(null);
   const [numero, setNumero] = useState("");
   const [mensaje, setMensaje] = useState("");
-  const [enviando, setEnviando] = useState(false);
   const camaraRef = useRef<CameraView>(null);
 
   const abrirCamara = async () => {
@@ -42,14 +39,10 @@ export default function EnviarFotoMascota() {
     setCamaraActiva(false);
   };
 
-  const enviarConFoto = async () => {
+  const enviarWhatsApp = () => {
     const telefonoLimpio = numero.replace(/\D/g, "");
     if (!telefonoLimpio) {
       Alert.alert("Error", "Ingresa un número de teléfono válido.");
-      return;
-    }
-    if (!fotoUri) {
-      Alert.alert("Error", "Toma una foto primero.");
       return;
     }
     if (!mensaje.trim()) {
@@ -57,52 +50,25 @@ export default function EnviarFotoMascota() {
       return;
     }
 
-    setEnviando(true);
-    try {
-      const disponible = await Sharing.isAvailableAsync();
-      if (!disponible) {
-        Alert.alert("No disponible", "Compartir no está disponible en este dispositivo.");
-        return;
-      }
+    const phone =
+      Platform.OS === "ios" ? `591${telefonoLimpio}` : `+591${telefonoLimpio}`;
+    const textoCodificado = encodeURIComponent(mensaje);
+    const url = `whatsapp://send?text=${textoCodificado}&phone=${phone}`;
 
-      const phone =
-        Platform.OS === "ios"
-          ? `591${telefonoLimpio}`
-          : `591${telefonoLimpio}`;
-
-      const textoCodificado = encodeURIComponent(mensaje);
-      const whatsappUrl = `whatsapp://send?phone=${phone}&text=${textoCodificado}`;
-
-     const destino = `${FileSystem.Paths.cache}/mascota_foto.jpg`;
-
-      await FileSystem.copyAsync({
-        from: fotoUri,
-        to: destino,
-      });
-
-      const puedeAbrir = await Linking.canOpenURL(whatsappUrl);
-
-      if (puedeAbrir) {
-        await Linking.openURL(whatsappUrl);
-        await new Promise((resolve) => setTimeout(resolve, 1500));
-      } else {
-        Alert.alert(
-          "WhatsApp no disponible",
-          "No se pudo abrir WhatsApp en este dispositivo."
-        );
-      }
-
-      await Sharing.shareAsync(destino, {
-        mimeType: "image/jpeg",
-        dialogTitle: "Enviar foto de mascota por WhatsApp",
-        UTI: "public.jpeg",
-      });
-    } catch (error) {
-      Alert.alert("Error", "No se pudo compartir la foto.");
-      console.error(error);
-    } finally {
-      setEnviando(false);
-    }
+    Linking.canOpenURL(url)
+      .then((supported) => {
+        if (!supported) {
+          Alert.alert(
+            "WhatsApp no encontrado",
+            "Asegúrate de tener WhatsApp instalado."
+          );
+        } else {
+          return Linking.openURL(url);
+        }
+      })
+      .catch(() =>
+        Alert.alert("Error", "No se pudo abrir WhatsApp.")
+      );
   };
 
   if (camaraActiva) {
@@ -151,7 +117,10 @@ export default function EnviarFotoMascota() {
         {fotoUri ? (
           <View>
             <Image source={{ uri: fotoUri }} style={styles.preview} />
-            <TouchableOpacity style={styles.retakeBtn} onPress={abrirCamara}>
+            <TouchableOpacity
+              style={styles.retakeBtn}
+              onPress={abrirCamara}
+            >
               <Text style={styles.retakeBtnText}>📷 Tomar otra foto</Text>
             </TouchableOpacity>
           </View>
@@ -177,22 +146,15 @@ export default function EnviarFotoMascota() {
       </View>
 
       <TouchableOpacity
-        style={[
-          styles.sendBtn,
-          (!fotoUri || enviando) && styles.sendBtnDisabled,
-        ]}
-        onPress={enviarConFoto}
-        disabled={!fotoUri || enviando}
+        style={[styles.sendBtn, !fotoUri && styles.sendBtnDisabled]}
+        onPress={enviarWhatsApp}
+        disabled={!fotoUri}
       >
-        <Text style={styles.sendBtnText}>
-          {enviando ? "Preparando..." : "💬 Enviar por WhatsApp"}
-        </Text>
+        <Text style={styles.sendBtnText}>💬 Enviar por WhatsApp</Text>
       </TouchableOpacity>
 
       {!fotoUri && (
-        <Text style={styles.hint}>
-          * Toma una foto primero para habilitar el envío
-        </Text>
+        <Text style={styles.hint}>* Toma una foto primero para habilitar el envío</Text>
       )}
     </ScrollView>
   );
